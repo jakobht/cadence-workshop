@@ -1,11 +1,14 @@
 package postnord
 
 import (
+	"context"
 	"fmt"
+	"time"
+
+	"go.uber.org/cadence/activity"
 	"go.uber.org/cadence/worker"
 	"go.uber.org/cadence/workflow"
 	"go.uber.org/zap"
-	"time"
 )
 
 const (
@@ -15,7 +18,10 @@ const (
 // RegisterWorkflow registers the OrderProcessingWorkflow.
 func RegisterWorkflow(w worker.Worker) {
 	w.RegisterWorkflowWithOptions(OrderProcessingWorkflow, workflow.RegisterOptions{Name: WorkflowName})
+
 	// Register your activities here
+	w.RegisterActivityWithOptions(validatePayment, activity.RegisterOptions{Name: "validatePayment"})
+	w.RegisterActivityWithOptions(shipPackage, activity.RegisterOptions{Name: "shipPackage"})
 }
 
 // Order represents an order with basic details like the ID, customer name, and order amount.
@@ -44,6 +50,11 @@ func OrderProcessingWorkflow(ctx workflow.Context, order Order) (string, error) 
 	// The payment validation step checks if the payment for the order is valid.
 	// In this example, we simulate the payment validation by calling the `validatePayment` activity.
 	// If validation fails, the workflow stops early and returns an appropriate error.
+	var paymentValidationResult string
+	err := workflow.ExecuteActivity(ctx, validatePayment, order).Get(ctx, &paymentValidationResult)
+	if err != nil {
+		return "", fmt.Errorf("validate payment for order: %v", err)
+	}
 
 	// Step 2: Ship the package
 	// Once the payment is validated, we proceed to ship the package.
@@ -57,6 +68,12 @@ func OrderProcessingWorkflow(ctx workflow.Context, order Order) (string, error) 
 
 // Add an activity here that validates a payment.
 // The validation fails if the order amount is greater than 25 (for example, due to payment policy restrictions).
+func validatePayment(ctx context.Context, order Order) (string, error) {
+	return "", nil
+}
 
 // Add another activity that ships the package.
 // This activity checks if the shipping address is provided. The shipping fails if the address is empty.
+func shipPackage(ctx context.Context, order Order) (string, error) {
+	return "", nil
+}
