@@ -2,6 +2,9 @@
 
 if [ "$(uname)" == "Darwin" ]; then
     # Mac OS X
+    
+    # Otherwise we gonna have "The requested image's platform (linux/amd64) does not match the detected host platform..." on Apple Silicon
+    export DOCKER_DEFAULT_PLATFORM=linux/amd64
     docker run -i -t ubercadence/cli:master --address host.docker.internal:7933 --transport tchannel "$@"
   else
     # Linux
