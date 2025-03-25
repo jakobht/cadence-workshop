@@ -2,6 +2,7 @@ package shippingcomplete
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"time"
@@ -24,6 +25,7 @@ func RegisterWorkflow(w worker.Worker) {
 	// Register your activities here
 	w.RegisterActivityWithOptions(validatePayment, activity.RegisterOptions{Name: "validatePaymentComplete"})
 	w.RegisterActivityWithOptions(shipProduct, activity.RegisterOptions{Name: "shipProductComplete"})
+	w.RegisterActivityWithOptions(estimatedDeliveryTime, activity.RegisterOptions{Name: "estimatedDeliveryTime"})
 }
 
 // Order represents an order with basic details like the ID, customer name, and order amount.
@@ -128,13 +130,61 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 		packageDelivered = true
 	})
 
+	var cancelFunc workflow.CancelFunc
+	justCanceledTimer := false
+	notificationSent := false
 	for !packageDelivered {
+		if !notificationSent && !justCanceledTimer {
+			cancelFunc, err = setupNotificationTimer(ctx, order, locations, s, cancelFunc, &justCanceledTimer, &notificationSent)
+			if err != nil {
+				logger.Error("Error setting up notification timer", zap.Error(err))
+			}
+		}
+
+		justCanceledTimer = false
 		s.Select(ctx)
 	}
 
 	// Step 3: Return a success message
 	// If both payment validation and shipping were successful, we return a success message indicating the order was processed.
 	return fmt.Sprintf("Order %s processed successfully for customer %s.", order.ID, order.Customer), nil
+}
+
+func setupNotificationTimer(ctx workflow.Context, order Order, locations []string, s workflow.Selector, cancelFunc workflow.CancelFunc, justCanceledTimer *bool, notificationSent *bool) (workflow.CancelFunc, error) {
+	// Cancel the previous timer if it exists
+	if cancelFunc != nil {
+		cancelFunc()
+	}
+
+	// Get the notification time based on the order and the last location
+	last_location := locations[len(locations)-1]
+	var deliveryTimeInDays int
+	err := workflow.ExecuteActivity(ctx, estimatedDeliveryTime, order, last_location).Get(ctx, &deliveryTimeInDays)
+	if err != nil {
+		return nil, fmt.Errorf("getting delivery time", zap.Error(err))
+	}
+
+	// Cancelable timer context
+	timerCtx, cancel := workflow.WithCancel(ctx)
+
+	// Create the timer and add it to the selector (we only wait minutes, not days)
+	timer := workflow.NewTimer(timerCtx, time.Duration(deliveryTimeInDays)*time.Minute)
+	s.AddFuture(timer, func(f workflow.Future) {
+		// Check if the timer was canceled
+		err := f.Get(ctx, nil)
+		var canceledErr *cadence.CanceledError
+		if errors.As(err, &canceledErr) {
+			workflow.GetLogger(ctx).Info("This timer was canceled")
+			*justCanceledTimer = true
+			return
+		}
+		// We should call an activity that sends a notification to the customer,
+		// but for now we will just log the event, and remember that we sent the notification
+		*notificationSent = true
+		workflow.GetLogger(ctx).Info("Notification timer fired!")
+	})
+
+	return cancel, nil
 }
 
 // Add an activity here that validates a payment.
@@ -164,5 +214,5 @@ func shipProduct(ctx context.Context, order Order) (string, error) {
 }
 
 func estimatedDeliveryTime(ctx context.Context, order Order, currentLocation string) (int, error) {
-	return rand.IntN(7) + 1, nil
+	return rand.IntN(3) + 1, nil
 }
