@@ -6,7 +6,6 @@ The system will support the following
 - Tracking the package across locations. The package will be scanned when it arrives at a new location
 - Informing the customer when the package is close to delivery
 - Letting the customer get the current location of their package
-    - The customer should be notified the day of delivery within the timezone of the customer.
 - Scale to hundreds of millions of packages
 
 The architecture of the system is shown below:
@@ -400,3 +399,9 @@ This function also looks a bit more complicated than it is. The function does th
 2. If the timer was canceled, we just ignore this event and return.
 3. If some other error happened with the timer we log the issue and stop the handling.
 4. Otherwise we note that we have sent the notification, and, for now, just log that we have sent the notification.
+
+
+# Final Thoughts
+Congratulations you have now build a *scaleable* track and trace backend in only ~250 lines of code, the system has retries, it can track hundreds of millions of packages. It can also track timers for all the packages and inform customers when their package is close to delivery.
+
+As a final exercise consider how you would have build this without Cadence, how would you handle millions of concurrent timers needed to fire at the right time. How would you handle hundreds of millions of scans across the days. How would you handle sharding, how would you make sure customers were not notified after delivery etc.
