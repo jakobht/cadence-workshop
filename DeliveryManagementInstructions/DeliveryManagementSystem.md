@@ -137,8 +137,11 @@ var paymentRetryPolicy = &cadence.RetryPolicy{
 We can then specify the policy in the activity options when starting the activity like this:
 ```go
 // Configure activity options with retry policy.
-activityOptions := workflow.ActivityOptions{
-	RetryPolicy: paymentRetryPolicy, // Attach retry policy.
+	// Configure activity options with retry policy, along with mandatory timeouts.
+var activityOptions = workflow.ActivityOptions{
+	RetryPolicy:            paymentRetryPolicy, // Attach retry policy.
+	ScheduleToStartTimeout: time.Minute,
+	StartToCloseTimeout:    time.Minute,
 }
 
 // Add the activity options to the context.
@@ -183,8 +186,8 @@ s := workflow.NewSelector(ctx)
 s.AddReceive(signalChan, func(c workflow.Channel, more bool) {
 	var signalVal ScanSignalValue
     c.Receive(ctx, &signalVal)
-    workflow.GetLogger(ctx).Info("Received signal!", zap.String("signal", "ScanSignal"), zap.String("value", signalVal))
-	locations := append(locations, signalVal.Location)
+    workflow.GetLogger(ctx).Info("Received signal!", zap.Any("signal", "ScanSignal"), zap.String("value", signalVal))
+	locations = append(locations, signalVal.Location)
 })
 ```
 
@@ -250,4 +253,4 @@ We can now signal the workflow as much as we want, and in the end send the deliv
 ```
 
 ## Quering the workflow for the status of the package
-We do not want customers to
+We do not want customers to look at the status of their delivery in the Cadence UI, so we would like to query the workflow for the current status of the delivery, we can do this using a

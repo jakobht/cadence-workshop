@@ -23,13 +23,14 @@
 package workflow
 
 import (
+	"go.uber.org/fx"
 	"workshop/workflow/helloworld"
 	"workshop/workflow/shipping"
-
-	"go.uber.org/fx"
+	"workshop/workflow/shippingcomplete"
 )
 
 var Module = fx.Invoke(
 	helloworld.RegisterWorkflow,
 	shipping.RegisterWorkflow,
+	shippingcomplete.RegisterWorkflow,
 )
