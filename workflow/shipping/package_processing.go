@@ -1,4 +1,4 @@
-package postnord
+package shipping
 
 import (
 	"context"
@@ -17,11 +17,10 @@ const (
 
 // RegisterWorkflow registers the OrderProcessingWorkflow.
 func RegisterWorkflow(w worker.Worker) {
-	w.RegisterWorkflowWithOptions(OrderProcessingWorkflow, workflow.RegisterOptions{Name: WorkflowName})
+	w.RegisterWorkflowWithOptions(PackageProcessingWorkflow, workflow.RegisterOptions{Name: WorkflowName})
 
 	// Register your activities here
 	w.RegisterActivityWithOptions(validatePayment, activity.RegisterOptions{Name: "validatePayment"})
-	w.RegisterActivityWithOptions(shipPackage, activity.RegisterOptions{Name: "shipPackage"})
 }
 
 // Order represents an order with basic details like the ID, customer name, and order amount.
@@ -30,21 +29,23 @@ type Order struct {
 	Customer string  `json:"customer"`
 	Amount   float64 `json:"amount"`
 	Address  string  `json:"address"`
+	SendFrom string  `json:"sendFrom"`
 }
 
-// OrderProcessingWorkflow processes an order through several steps:
+// PackageProcessingWorkflow processes an order through several steps:
 // 1. It first validates the payment for the order.
 // 2. Then, it proceeds to ship the package.
 // 3. Finally, it returns a result indicating success or failure based on the payment and shipping status.
-func OrderProcessingWorkflow(ctx workflow.Context, order Order) (string, error) {
+func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error) {
 	ao := workflow.ActivityOptions{
 		ScheduleToStartTimeout: time.Minute,
 		StartToCloseTimeout:    time.Minute,
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
+	// Important: We need to use the Cadence supplied logger.
 	logger := workflow.GetLogger(ctx)
-	logger.Info("Starting OrderProcessingWorkflow", zap.String("orderID", order.ID), zap.String("customer", order.Customer))
+	logger.Info("Starting PackageProcessingWorkflow", zap.String("orderID", order.ID), zap.String("customer", order.Customer))
 
 	// Step 1: Validate the payment.
 	// The payment validation step checks if the payment for the order is valid.
@@ -69,11 +70,5 @@ func OrderProcessingWorkflow(ctx workflow.Context, order Order) (string, error) 
 // Add an activity here that validates a payment.
 // The validation fails if the order amount is greater than 25 (for example, due to payment policy restrictions).
 func validatePayment(ctx context.Context, order Order) (string, error) {
-	return "", nil
-}
-
-// Add another activity that ships the package.
-// This activity checks if the shipping address is provided. The shipping fails if the address is empty.
-func shipPackage(ctx context.Context, order Order) (string, error) {
 	return "", nil
 }
