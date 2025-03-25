@@ -73,7 +73,8 @@ http://localhost:8088/domains/cadence-workshop
 We are now ready to start building our service.
 
 # Building the service
-Each package will be handled using the package_processing workflow. A small part of this is already implemented in the `workflow/package/package_processing.go` file.
+Each package will be handled using the package_processing workflow. A small part of this is already implemented in the `workflow/shipping/package_processing.go` file.
+If you get stuck or just want to see how we did it, you can always look at the `workflow/shippingcompleate/package_processing.go` file which has the whole workflow implemented.
 
 ## Implementing the first activities.
 Lets implement the `validatePayment()` and `shipProduct()` activities for the OrderProcessingWorkflow.
@@ -252,5 +253,38 @@ We can now signal the workflow as much as we want, and in the end send the deliv
 ./cadence --domain cadence-workshop wf signal --name "DeliveredSignal" --workflow_id Order123
 ```
 
-## Quering the workflow for the status of the package
-We do not want customers to look at the status of their delivery in the Cadence UI, so we would like to query the workflow for the current status of the delivery, we can do this using a
+## Querying the workflow for the status of the package
+We do not want customers to look at the status of their delivery in the Cadence UI, so we would like to query the workflow for the current status of the delivery, we can do this using a Cadence query handler.
+
+The query handler will be defined right below the definitions of the `locations` and `packageDelivered` variables, as we need the query handler code to run there.
+
+First we define the query result struct:
+```go
+type QueryResult struct {
+	Delivered bool `json:"delivered"`
+	LocationHistory []string `json:"locationHistory"`
+}
+```
+
+We can then add the query handler:
+```go
+err := workflow.SetQueryHandler(ctx, "current_status", func() (QueryResult, error) {
+	return QueryResult{
+		Delivered:       packageDelivered,
+		LocationHistory: locations,
+	}, nil
+})
+if err != nil {
+	return "", fmt.Errorf("set query handler: %v", err)
+}
+```
+
+Now we can query the running workflow using the CLI:
+```bash
+./cadence --domain cadence-workshop wf query --query_type current_status --workflow_id Order123
+```
+
+We can also run the query from the cadence UI on the Queries tab.
+
+## Notification timer
+We want to notify the customer where there is 1 day until the package will arrive. We can calculate this time using the current location and the package order. We will simulate the calculation and just choose a random number between 1 and 7 in this tutorial. Lets add the function:

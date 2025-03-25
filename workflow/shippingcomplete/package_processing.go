@@ -3,6 +3,7 @@ package shippingcomplete
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"go.uber.org/cadence"
@@ -38,6 +39,11 @@ type ScanSignalValue struct {
 	Location string `json:"location"`
 }
 
+type QueryResult struct {
+	Delivered       bool     `json:"delivered"`
+	LocationHistory []string `json:"locationHistory"`
+}
+
 // PackageProcessingWorkflow processes an order through several steps:
 // 1. It first validates the payment for the order.
 // 2. Then, it proceeds to ship the package.
@@ -45,6 +51,16 @@ type ScanSignalValue struct {
 func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error) {
 	locations := []string{order.SendFrom}
 	packageDelivered := false
+
+	err := workflow.SetQueryHandler(ctx, "current_status", func() (QueryResult, error) {
+		return QueryResult{
+			Delivered:       packageDelivered,
+			LocationHistory: locations,
+		}, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("set query handler: %v", err)
+	}
 
 	ao := workflow.ActivityOptions{
 		ScheduleToStartTimeout: time.Minute,
@@ -80,7 +96,7 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 	activityCtx := workflow.WithActivityOptions(ctx, activityOptions)
 
 	var paymentValidationResult string
-	err := workflow.ExecuteActivity(activityCtx, validatePayment, order).Get(ctx, &paymentValidationResult)
+	err = workflow.ExecuteActivity(activityCtx, validatePayment, order).Get(ctx, &paymentValidationResult)
 	if err != nil {
 		return "", fmt.Errorf("validate payment for order: %v", err)
 	}
@@ -145,4 +161,8 @@ func shipProduct(ctx context.Context, order Order) (string, error) {
 	}
 	activity.GetLogger(ctx).Info("Shipping product", zap.String("orderID", order.ID))
 	return "Product shipped successfully", nil
+}
+
+func estimatedDeliveryTime(ctx context.Context, order Order, currentLocation string) (int, error) {
+	return rand.IntN(7) + 1, nil
 }
