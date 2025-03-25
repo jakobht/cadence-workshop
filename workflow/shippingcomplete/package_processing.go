@@ -2,6 +2,7 @@ package shippingcomplete
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"time"
@@ -24,6 +25,7 @@ func RegisterWorkflow(w worker.Worker) {
 	// Register your activities here
 	w.RegisterActivityWithOptions(validatePayment, activity.RegisterOptions{Name: "validatePaymentComplete"})
 	w.RegisterActivityWithOptions(shipProduct, activity.RegisterOptions{Name: "shipProductComplete"})
+	w.RegisterActivityWithOptions(estimatedDeliveryTime, activity.RegisterOptions{Name: "estimatedDeliveryTimeComplete"})
 }
 
 // Order represents an order with basic details like the ID, customer name, and order amount.
@@ -116,11 +118,21 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 	// We will use the signal to update the package location
 	signalChan := workflow.GetSignalChannel(ctx, "ScanSignal")
 	s := workflow.NewSelector(ctx)
+	notificationSent := false
+	timerCancel, err := updateTimeout(ctx, s, nil, &notificationSent, order, locations)
+	if err != nil {
+		return "", fmt.Errorf("update timeout: %v", err)
+	}
+
 	s.AddReceive(signalChan, func(c workflow.Channel, more bool) {
 		var signalVal ScanSignalValue
 		c.Receive(ctx, &signalVal)
 		workflow.GetLogger(ctx).Info("Received signal!", zap.String("signal", "ScanSignal"), zap.Any("value", signalVal))
 		locations = append(locations, signalVal.Location)
+		timerCancel, err = updateTimeout(ctx, s, timerCancel, &notificationSent, order, locations)
+		if err != nil {
+			workflow.GetLogger(ctx).Error("Error updating timeout", zap.Error(err))
+		}
 	})
 
 	deliveredChan := workflow.GetSignalChannel(ctx, "DeliveredSignal")
@@ -163,6 +175,60 @@ func shipProduct(ctx context.Context, order Order) (string, error) {
 	return "Product shipped successfully", nil
 }
 
+// Activity which estimates the delivery time based on the current location of the package
 func estimatedDeliveryTime(ctx context.Context, order Order, currentLocation string) (int, error) {
-	return rand.IntN(7) + 1, nil
+	return rand.IntN(3) + 1, nil
+}
+
+func updateTimeout(ctx workflow.Context, s workflow.Selector, timerCancel workflow.CancelFunc, notificationSent *bool, order Order, locations []string) (workflow.CancelFunc, error) {
+	// Cancel the previous timer if it exists
+	if timerCancel != nil {
+		timerCancel()
+	}
+
+	// If the notification has already been sent, do not create a new timer
+	if *notificationSent {
+		return nil, nil
+	}
+
+	// Get the delivery estimate
+	var daysToDelivery int
+	err := workflow.ExecuteActivity(ctx, estimatedDeliveryTime, order, locations[len(locations)-1]).Get(ctx, &daysToDelivery)
+	if err != nil {
+		return nil, fmt.Errorf("estimated delivery time: %v", err)
+	}
+
+	// Create a new timer context and cancel function
+	var timerCtx workflow.Context
+	timerCtx, timerCancel = workflow.WithCancel(ctx)
+
+	// Create a new timer with the new context, we use minutes instead of days
+	timer := workflow.NewTimer(timerCtx, time.Duration(daysToDelivery)*time.Minute)
+
+	// Add the new timer to the selector
+	s.AddFuture(timer, func(f workflow.Future) {
+		handleTimeout(ctx, f, notificationSent)
+	})
+	return timerCancel, nil
+}
+
+func handleTimeout(ctx workflow.Context, f workflow.Future, notificationSent *bool) {
+	err := f.Get(ctx, nil)
+	// If the timer was canceled, ignore the event
+	var canceledErr *cadence.CanceledError
+	if errors.As(err, &canceledErr) {
+		return
+	}
+
+	// If there was an error, log it and return
+	if err != nil {
+		workflow.GetLogger(ctx).Error("Error updating timeout", zap.Error(err))
+		return
+	}
+
+	// The notification was sent, set the flag to true
+	*notificationSent = true
+
+	// We should call a notification activity here - but we just log it for now
+	workflow.GetLogger(ctx).Info("Notification sent")
 }

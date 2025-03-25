@@ -287,4 +287,116 @@ Now we can query the running workflow using the CLI:
 We can also run the query from the cadence UI on the Queries tab.
 
 ## Notification timer
-We want to notify the customer where there is 1 day until the package will arrive. We can calculate this time using the current location and the package order. We will simulate the calculation and just choose a random number between 1 and 7 in this tutorial. Lets add the function:
+We want to notify the customer where there is 1 day until the package will arrive. We can calculate this time using the current location and the package order. We will simulate the calculation and just choose a random number between 1 and 7 in this tutorial. Lets add the function, we will call this function as an activity, so we also have to register it in the top of the workflow.
+
+```go
+func estimatedDeliveryTime(ctx context.Context, order Order, currentLocation string) (int, error) {
+	return rand.IntN(3) + 1, nil
+}
+```
+
+###  Changing the workflow code
+We want the following, when a new scan signal comes in we want to update the timer, as we have new information about the location of the package. If the notification has been sent once, we do not send it ever again.
+
+Right after we create the selector we create two variables, `notificationSent` and `timerCancel`. `notificationSent` keeps track of if we have ever sent the notification to the user, if so we should not resend it. `timerCancel` is a handle we can use to cancel the current timer waiting to notify the user. We create the two new variables like this:
+
+```go
+s := workflow.NewSelector(ctx) // existing line
+notificationSent := false
+timerCancel, err := updateTimeout(ctx, s, nil, &notificationSent, order, locations)
+if err != nil {
+	return "", fmt.Errorf("update timeout: %v", err)
+}
+```
+
+We have not yet written the `updateTimeout` function.
+
+We then need to trigger the `updateTimeout` every time we get a scan signal. We add the call in the signal handler function, right after we append to the locations slice. We simply call the `updateTimeout` function:
+
+```go
+locations = append(locations, signalVal.Location) // existing line
+timerCancel, err = updateTimeout(ctx, s, timerCancel, &notificationSent, order, locations)
+if err != nil {
+	workflow.GetLogger(ctx).Error("Error updating timeout", zap.Error(err))
+}
+```
+
+### The update timeout function
+Then we just need to write the updateTimeout function, it's listed here in it's entirety:
+```go
+func updateTimeout(ctx workflow.Context, s workflow.Selector, timerCancel workflow.CancelFunc, notificationSent *bool, order Order, locations []string) (workflow.CancelFunc, error) {
+	// Cancel the previous timer if it exists
+	if timerCancel != nil {
+		timerCancel()
+	}
+
+	// If the notification has already been sent, do not create a new timer
+	if *notificationSent {
+		return nil, nil
+	}
+
+	// Get the delivery estimate
+	var daysToDelivery int
+	err := workflow.ExecuteActivity(ctx, estimatedDeliveryTime, order, locations[len(locations)-1]).Get(ctx, &daysToDelivery)
+	if err != nil {
+		return nil, fmt.Errorf("estimated delivery time: %v", err)
+	}
+
+	// Create a new timer context and cancel function
+	var timerCtx workflow.Context
+	timerCtx, timerCancel = workflow.WithCancel(ctx)
+
+	// Create a new timer with the new context, we use minutes instead of days
+	timer := workflow.NewTimer(timerCtx, time.Duration(daysToDelivery)*time.Minute)
+
+	// Add the new timer to the selector
+	s.AddFuture(timer, func(f workflow.Future) {
+		handleTimeout(ctx, f, notificationSent)
+	})
+	return timerCancel, nil
+}
+```
+
+Note that the `updateTimeout` function calls the `handleTimeout` function which is discussed below. The `updateTimeout` progresses in the following steps:
+
+1. Check if the timerCancel handle has a timer, if it does we cancel the old timer so we never have more than one notification timer.
+2. Check if the notification has already been sent, if so we just return.
+3. Call the activity we created above which estimates how many days there are until the delivery.
+4. Create a new context with timeout so we can cancel the timer (this `timerCancel` is the new handle that will be canceled in step 1.).
+5. create the new timer
+6. Add the timer to the selector with `handleTimeout` as the handler function.
+
+So to sum up, we cancel any old timer, do some checks, then we create the new timer, and add it to the selector.
+
+### The handle timeout function
+The handler function is listed below:
+
+```go
+func handleTimeout(ctx workflow.Context, f workflow.Future, notificationSent *bool) {
+	err := f.Get(ctx, nil)
+	// If the timer was canceled, ignore the event
+	var canceledErr *cadence.CanceledError
+	if errors.As(err, &canceledErr) {
+		return
+	}
+
+	// If there was an error, log it and return
+	if err != nil {
+		workflow.GetLogger(ctx).Error("Error updating timeout", zap.Error(err))
+		return
+	}
+
+	// The notification was sent, set the flag to true
+	*notificationSent = true
+
+	// We should call a notification activity here - but we just log it for now
+	workflow.GetLogger(ctx).Info("Notification sent")
+}
+```
+
+This function also looks a bit more complicated than it is. The function does the following:
+
+1. Get the future, we just do this to see any errors. A canceled timers future will be available immediately and will return a `CanceledError`, so we need to check for this.
+2. If the timer was canceled, we just ignore this event and return.
+3. If some other error happened with the timer we log the issue and stop the handling.
+4. Otherwise we note that we have sent the notification, and, for now, just log that we have sent the notification.
