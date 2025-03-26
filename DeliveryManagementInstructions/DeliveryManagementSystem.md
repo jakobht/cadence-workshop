@@ -73,7 +73,7 @@ We are now ready to start building our service.
 
 # Building the service
 Each package will be handled using the package_processing workflow. A small part of this is already implemented in the `workflow/shipping/package_processing.go` file.
-If you get stuck or just want to see how we did it, you can always look at the `workflow/shippingcompleate/package_processing.go` file which has the whole workflow implemented.
+If you get stuck or just want to see how we did it, you can always look at the `workflow/shippingcomplete/package_processing.go` file which has the whole workflow implemented.
 
 ## Implementing the first activities.
 Lets implement the `validatePayment()` and `shipProduct()` activities for the OrderProcessingWorkflow.
@@ -86,7 +86,7 @@ if it is, return an error indicating that shipping failed, otherwise simulate sh
 > [!NOTE]
 > Remember to *register* the `shipProduct` activity the same way the `validatePayment` activity is registered in the top of the workflow.
 
-After this is implemented we can simulate a package getting send, and manually start the workflow using the following command:
+After this is implemented we can simulate a package getting sent, and manually start the workflow using the following command:
 ```bash
 ./cadence --domain cadence-workshop wf start --tasklist tasklist --execution_timeout 10 --workflow_type OrderProcessingWorkflow --input '{"id":"Order123", "customer": "Cadence", "amount": 20, "address": "Uber office", "sendFrom": "Aarhus"}'
 ```
@@ -218,7 +218,7 @@ for {
 }
 ```
 
-We can now start a workflow and signal it as much as we want, however, since the loop is infinite we will never terminate the workflow.
+We can now start a workflow and signal it as much as we want, however, since the loop is infinite we will never complete the workflow.
 
 ### Adding a `delivered` signal
 We will add a signal to the workflow to signal that the package has been delivered, and the workflow should terminate.
