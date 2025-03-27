@@ -186,7 +186,7 @@ s := workflow.NewSelector(ctx)
 s.AddReceive(signalChan, func(c workflow.Channel, more bool) {
 	var signalVal ScanSignalValue
     c.Receive(ctx, &signalVal)
-    workflow.GetLogger(ctx).Info("Received signal!", zap.Any("signal", "ScanSignal"), zap.String("value", signalVal))
+    workflow.GetLogger(ctx).Info("Received signal!", zap.Any("signal", "ScanSignal"), zap.Any("value", signalVal))
 	locations = append(locations, signalVal.Location)
 })
 ```
